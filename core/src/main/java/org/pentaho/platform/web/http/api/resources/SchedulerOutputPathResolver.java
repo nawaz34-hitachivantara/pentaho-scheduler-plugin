@@ -20,6 +20,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.pentaho.platform.api.engine.IPentahoSession;
+import org.pentaho.platform.api.engine.IPluginResourceLoader;
 import org.pentaho.platform.api.genericfile.GenericFilePermission;
 import org.pentaho.platform.api.genericfile.IGenericFileService;
 import org.pentaho.platform.api.genericfile.exception.OperationFailedException;
@@ -127,10 +128,12 @@ public class SchedulerOutputPathResolver {
     return userName;
   }
 
-  public String resolveOutputFilePath() {
+  public String resolveOutputFilePath() throws SchedulerException {
 
     try {
       return SecurityHelper.getInstance().runAsUser( getScheduleOwner(), this::resolveOutputFilePathCore );
+    } catch ( SchedulerException schedulerException ) {
+      throw new SchedulerException( schedulerException );
     } catch ( Exception e ) {
       logger.error( e.getMessage(), e );
     }
@@ -138,7 +141,7 @@ public class SchedulerOutputPathResolver {
     return null;
   }
 
-  String resolveOutputFilePathCore() {
+  String resolveOutputFilePathCore() throws SchedulerException {
     String fileNamePattern = "/" + getOutputFileBaseName() + ".*";
 
     String outputFolderPath = scheduleRequest.getOutputFile();
@@ -148,11 +151,17 @@ public class SchedulerOutputPathResolver {
       outputFolderPath = outputFolderPath.substring( 0, outputFolderPath.indexOf( fileNamePattern ) );
     }
 
-    if ( isValidOutputPath( outputFolderPath, false ) ) {
+    boolean isFallbackEnabled = SchedulerFallBackConfig.getInstance().isFallbackEnabled();
+
+    if ( isValidOutputPath( outputFolderPath, isFallbackEnabled ) ) {
       return outputFolderPath + fileNamePattern; // return if valid
+    } else if ( !isFallbackEnabled ) {  // If fallback is not enabled, throw an exception
+      throw new SchedulerException( Messages.getInstance()
+              .getString( "QuartzScheduler.ERROR_0010_UNAVAILABLE_OUTPUT_LOCATION", outputFolderPath, getJobName(),
+                      getScheduleOwner() ) );
     }
 
-    // output path invalid, proceed to fallback
+      // output path invalid, proceed to fallback
     logger.warn( Messages.getInstance()
       .getString( "QuartzScheduler.ERROR_0011_UNAVAILABLE_OUTPUT_LOCATION_ERROR", outputFolderPath, getJobName(),
         getScheduleOwner() ) );
@@ -165,7 +174,7 @@ public class SchedulerOutputPathResolver {
     };
 
     for ( String fallbackPath : fallbackPaths ) {
-      if ( isValidOutputPath( fallbackPath, true ) ) {
+      if ( isValidOutputPath( fallbackPath, true) ) {
         // This is a warning so that it pairs with the messages which are real warnings emitted from doesFolderExist
         // and isPermitted. This is actually a resolution message for the other warnings.
         logger.warn( Messages.getInstance().getString(

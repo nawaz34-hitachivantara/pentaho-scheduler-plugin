@@ -34,6 +34,7 @@ import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.engine.security.SecurityHelper;
 import org.pentaho.platform.scheduler2.ISchedulerOutputPathResolver;
 import org.pentaho.platform.scheduler2.messsages.Messages;
+import org.pentaho.platform.web.http.api.resources.SchedulerFallBackConfig;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -121,12 +122,18 @@ public class SchedulerOutputPathResolver implements ISchedulerOutputPathResolver
     return runAsUser( this::resolveOutputFilePathCore );
   }
 
-  private String resolveOutputFilePathCore() {
+  private String resolveOutputFilePathCore() throws SchedulerException {
     String outputFilePath = getDirectory();
     String fileNamePattern = getFilename();
 
-    if ( isValidOutputPath( outputFilePath, false ) ) {
-      return concat( outputFilePath, fileNamePattern );
+    boolean isFallbackEnabled = SchedulerFallBackConfig.getInstance().isFallbackEnabled();
+
+    if ( isValidOutputPath( outputFilePath, isFallbackEnabled ) ) {
+      return concat( outputFilePath, fileNamePattern ); // return if valid
+    } else if ( !isFallbackEnabled ) { // If fallback is not enabled, throw an exception
+      throw new SchedulerException( Messages.getInstance()
+                .getString( "QuartzScheduler.ERROR_0010_UNAVAILABLE_OUTPUT_LOCATION", outputFilePath, getJobName(),
+                        actionUser ) );
     }
 
     // evaluate fallback output paths
